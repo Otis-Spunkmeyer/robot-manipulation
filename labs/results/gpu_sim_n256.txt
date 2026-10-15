@@ -1,0 +1,14 @@
+# -------------------------------------------------------------------------- #
+Task ID: PickCube-v1, 256 parallel environments, sim_backend=physx_cuda
+obs_mode=state, control_mode=pd_joint_delta_pos
+render_mode=rgb_array, sensor_details=RGBD(128x128)
+sim_freq=120, control_freq=60
+observation space: Box(-inf, inf, (256, 42), float32)
+(single) action space: Box(-1.0, 1.0, (8,), float32)
+# -------------------------------------------------------------------------- #
+start recording env.step metrics
+env.step: 33529.395 steps/s, 130.974 parallel steps/s, 1000 steps in 7.635s
+    CPU mem: 3018.074 MB, GPU mem: 1403.969 MB
+start recording env.step+env.reset metrics
+env.step+env.reset: 34970.738 steps/s, 136.604 parallel steps/s, 1000 steps in 7.320s
+    CPU mem: 3025.594 MB, GPU mem: 1403.969 MB

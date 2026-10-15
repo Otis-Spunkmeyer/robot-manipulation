@@ -1,0 +1,7 @@
+servo kv (j1..j7): [450. 450. 350. 350. 200. 200. 200.]
+
+case                                      j2 e [deg]  j4 e [deg]  j2 settle [s]
+frictionless, damping 1                       0.3771     -0.3617          0.362
+friction 2.0 N*m, start at q_ref              0.3771     -0.3617               
+friction 2.0 N*m, start beyond sag            0.3771     -0.3617               
+frictionless, damping 20                      0.3771     -0.3617          0.380

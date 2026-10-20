@@ -134,18 +134,71 @@ class PoEModel:
     def n(self) -> int:
         return len(self.joint_names)
 
-    def fk_space(self, theta) -> np.ndarray:
-        return mr.FKinSpace(self.M, self.Slist, np.asarray(theta, dtype=float))
+    # --- input validation and limits ---------------------------------------
 
-    def fk_body(self, theta) -> np.ndarray:
-        return mr.FKinBody(self.M, self.Blist, np.asarray(theta, dtype=float))
+    def validate(self, theta) -> np.ndarray:
+        """Return theta as a float array of shape (n,); raise ValueError if malformed."""
+        try:
+            th = np.asarray(theta, dtype=float)
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"theta must be numeric, got {theta!r}") from e
+        if th.shape != (self.n,):
+            raise ValueError(
+                f"theta must have shape ({self.n},) for joints {self.joint_names}, got {th.shape}"
+            )
+        if not np.all(np.isfinite(th)):
+            bad = [self.joint_names[i] for i in np.flatnonzero(~np.isfinite(th))]
+            raise ValueError(f"theta has NaN/inf for joints {bad}")
+        return th
+
+    def limit_violations(self, theta, tol: float = 0.0) -> dict[str, tuple[float, float, float]]:
+        """Joints outside [lower - tol, upper + tol]: name -> (value, lower, upper).
+
+        Joints with no limit in the URDF (nan) are never reported.
+        """
+        th = self.validate(theta)
+        out = {}
+        for name, v, lo, hi in zip(self.joint_names, th, self.lower, self.upper):
+            if (not np.isnan(lo) and v < lo - tol) or (not np.isnan(hi) and v > hi + tol):
+                out[name] = (float(v), float(lo), float(hi))
+        return out
+
+    def within_limits(self, theta, tol: float = 0.0) -> bool:
+        return not self.limit_violations(theta, tol)
+
+    def clip_to_limits(self, theta) -> np.ndarray:
+        """Clamp each joint into its URDF range (unlimited joints pass through)."""
+        th = self.validate(theta)
+        lo = np.where(np.isnan(self.lower), -np.inf, self.lower)
+        hi = np.where(np.isnan(self.upper), np.inf, self.upper)
+        return np.clip(th, lo, hi)
+
+    def _prep(self, theta, check_limits: bool) -> np.ndarray:
+        th = self.validate(theta)
+        if check_limits:
+            bad = self.limit_violations(th)
+            if bad:
+                detail = ", ".join(
+                    f"{k}={np.rad2deg(v):.1f} deg (limits {np.rad2deg(lo):.1f} to {np.rad2deg(hi):.1f})"
+                    for k, (v, lo, hi) in bad.items()
+                )
+                raise ValueError(f"joint limits exceeded: {detail}")
+        return th
+
+    # --- forward kinematics -------------------------------------------------
+
+    def fk_space(self, theta, check_limits: bool = False) -> np.ndarray:
+        return mr.FKinSpace(self.M, self.Slist, self._prep(theta, check_limits))
+
+    def fk_body(self, theta, check_limits: bool = False) -> np.ndarray:
+        return mr.FKinBody(self.M, self.Blist, self._prep(theta, check_limits))
 
     def fk_urdf(self, theta) -> np.ndarray:
         """Reference FK: compose URDF joint origins and joint motions directly.
 
         Independent of the screw axes, so it catches errors in building S and B.
         """
-        theta = np.asarray(theta, dtype=float)
+        theta = self.validate(theta)
         T = np.eye(4)
         k = 0
         for j in self.chain:

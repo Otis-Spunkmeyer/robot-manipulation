@@ -19,7 +19,11 @@ def arm():
 
 @pytest.fixture(scope="module")
 def to_wrist():
-    """J1-3 only, tip at the wrist_flex joint (Wk 2 Mon Problem 2)."""
+    """Tip at the wrist_flex joint (Wk 2 Mon Problem 2).
+
+    wrist_link is the child of wrist_flex, so the chain has 4 joints. Rotating
+    wrist_flex does not move its own origin, so theta4 = 0 reproduces Problem 2.
+    """
     return build_poe(URDF, "base_link", "wrist_link")
 
 
@@ -83,7 +87,7 @@ def test_monday_S_list(to_roll):
 
 
 def test_monday_problem2_wrist_point(to_wrist):
-    th = np.deg2rad([30, 20, -40])
+    th = np.deg2rad([30, 20, -40, 0])
     p = to_wrist.fk_space(th)[:3, 3]
     assert np.allclose(p, [0.2204, -0.1260, 0.2639], atol=2e-4)
 
@@ -96,9 +100,80 @@ def test_joint_directions(to_wrist):
     """+5 deg on each joint moves the wrist point the way Monday's (b) found."""
     d = np.deg2rad(5)
     p0 = to_wrist.M[:3, 3]
-    dp1 = to_wrist.fk_space([d, 0, 0])[:3, 3] - p0
-    dp2 = to_wrist.fk_space([0, d, 0])[:3, 3] - p0
-    dp3 = to_wrist.fk_space([0, 0, d])[:3, 3] - p0
+    dp1 = to_wrist.fk_space([d, 0, 0, 0])[:3, 3] - p0
+    dp2 = to_wrist.fk_space([0, d, 0, 0])[:3, 3] - p0
+    dp3 = to_wrist.fk_space([0, 0, d, 0])[:3, 3] - p0
     assert dp1[1] < 0          # pan swings toward -y
     assert dp2[2] < 0          # shoulder_lift tips the arm down
     assert dp3[2] < 0          # elbow_flex drops the forearm
+
+
+# --- input validation and joint limits (build extension) -------------------
+
+def test_accepts_list_and_tuple(arm):
+    th = [0.1, -0.2, 0.3, 0.0, 0.5]
+    assert np.allclose(arm.fk_space(th), arm.fk_space(tuple(th)))
+    assert np.allclose(arm.fk_space(th), arm.fk_space(np.array(th)))
+
+
+@pytest.mark.parametrize("bad", [np.zeros(4), np.zeros(6), np.zeros((5, 1)), 0.0])
+def test_wrong_shape_raises(arm, bad):
+    with pytest.raises(ValueError, match="shape"):
+        arm.fk_space(bad)
+
+
+@pytest.mark.parametrize("val", [np.nan, np.inf, -np.inf])
+def test_nonfinite_raises_and_names_joint(arm, val):
+    th = np.zeros(5)
+    th[2] = val
+    with pytest.raises(ValueError, match="elbow_flex"):
+        arm.fk_space(th)
+
+
+def test_non_numeric_raises(arm):
+    with pytest.raises(ValueError, match="numeric"):
+        arm.fk_space(["a", 0, 0, 0, 0])
+
+
+def test_limits_parsed_from_urdf(arm):
+    # shoulder_pan: +/-1.91986 rad (110 deg) in so101_new_calib.urdf
+    assert np.isclose(arm.lower[0], -1.91986)
+    assert np.isclose(arm.upper[0], 1.91986)
+    assert np.all(arm.lower < arm.upper)
+
+
+def test_within_limits_edges(arm):
+    assert arm.within_limits(np.zeros(5))
+    assert arm.within_limits(arm.upper)                 # boundary is inside
+    over = arm.upper.copy()
+    over[1] += 1e-3
+    assert not arm.within_limits(over)
+    assert arm.within_limits(over, tol=2e-3)            # tolerance band
+
+
+def test_limit_violations_reports_only_bad_joints(arm):
+    th = np.zeros(5)
+    th[0] = arm.upper[0] + 0.1
+    th[3] = arm.lower[3] - 0.1
+    bad = arm.limit_violations(th)
+    assert set(bad) == {"shoulder_pan", "wrist_flex"}
+    v, lo, hi = bad["shoulder_pan"]
+    assert v > hi
+
+
+def test_check_limits_flag(arm):
+    th = np.zeros(5)
+    th[0] = 2.5                                         # 143 deg, past 110 deg
+    arm.fk_space(th)                                    # default: no check
+    with pytest.raises(ValueError, match="shoulder_pan"):
+        arm.fk_space(th, check_limits=True)
+    with pytest.raises(ValueError, match="shoulder_pan"):
+        arm.fk_body(th, check_limits=True)
+
+
+def test_clip_to_limits(arm):
+    th = np.array([5.0, -5.0, 0.1, 0.0, 0.0])
+    c = arm.clip_to_limits(th)
+    assert arm.within_limits(c)
+    assert np.isclose(c[0], arm.upper[0]) and np.isclose(c[1], arm.lower[1])
+    assert np.allclose(c[2:], th[2:])                   # in-range joints untouched

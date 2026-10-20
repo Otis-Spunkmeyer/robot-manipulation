@@ -17,3 +17,4 @@ wandb/
 # Editor / OS
 .vscode/
 .DS_Store
+assets/so101/so101_rviz.urdf

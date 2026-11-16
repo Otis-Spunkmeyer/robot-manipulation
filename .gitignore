@@ -21,3 +21,4 @@ assets/so101/so101_rviz.urdf
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
+build/
